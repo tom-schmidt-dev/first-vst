@@ -2,13 +2,13 @@
 #include "PluginEditor.h"
 
 DDSPAudioProcessor::DDSPAudioProcessor()
-: AudioProcessor(BusesProperties()
-.withInput("Input", juce::AudioChannelSet::stereo(), true)
-.withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-apvts(*this, nullptr, "Parameters", createParameterLayout()),
-mInputBuffer(fifoCapacity, 0.0f),
-mOutputBufferL(fifoCapacity, 0.0f),
-mOutputBufferR(fifoCapacity, 0.0f)
+    : AudioProcessor(BusesProperties()
+                     .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                     .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      apvts(*this, nullptr, "Parameters", createParameterLayout()),
+      mInputBuffer(fifoCapacity, 0.0f),
+      mOutputBufferL(fifoCapacity, 0.0f),
+      mOutputBufferR(fifoCapacity, 0.0f)
 {
     mDryWetParam = apvts.getRawParameterValue("dry_wet");
 }
@@ -20,9 +20,10 @@ DDSPAudioProcessor::~DDSPAudioProcessor() {
 juce::AudioProcessorValueTreeState::ParameterLayout DDSPAudioProcessor::createParameterLayout() {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
+    // Reihe 1: Synthese & Raum
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{"dry_wet", 1}, "Dry/Wet",
-        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.7f));
+        juce::ParameterID{"dry_wet", 1}, "Dry / Wet",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.70f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"detune_cents", 1}, "Ensemble Detune",
@@ -30,21 +31,57 @@ juce::AudioProcessorValueTreeState::ParameterLayout DDSPAudioProcessor::createPa
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"stereo_spread", 1}, "Stereo Spread",
-        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.8f));
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.80f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"sub_gain", 1}, "Sub Octave",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.35f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"high_gain", 1}, "High Octave",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.20f));
+
+    // Reihe 2: Gesangs- & Timbre-Adaption
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"tracking_tolerance", 1}, "Tolerance",
         juce::NormalisableRange<float>(0.30f, 0.95f, 0.01f), 0.70f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"formant_blend", 1}, "Formant Match",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.50f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"spectral_tilt", 1}, "Dynamic Tilt",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.60f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"transient_track", 1}, "Attack Track",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.50f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"noise_gain", 1}, "Noise / Breath",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.20f));
+
+    // Voice Pitch Tuning
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"sub_octave", 1}, "Sub Octave Shift", -3, 1, -1));
+
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"sub_semitones", 1}, "Sub Semitones", -12, 12, 0));
+
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"high_octave", 1}, "High Octave Shift", -1, 3, 1));
+
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"high_semitones", 1}, "High Semitones", -12, 12, 0));
+
+    
 
     return { params.begin(), params.end() };
 }
 
 void DDSPAudioProcessor::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
-    setLatencySamples(2048); // Meldet 46 ms Vorlauf an Reaper zur Latenzkompensation
+    setLatencySamples(2048);
 
     juce::File currentBinary = juce::File::getSpecialLocation(juce::File::currentExecutableFile);
     juce::File modelFile = currentBinary.getSiblingFile("ddsp_decoder.onnx");
@@ -73,7 +110,6 @@ void DDSPAudioProcessor::reset() {
     std::fill(mOutputBufferL.begin(), mOutputBufferL.end(), 0.0f);
     std::fill(mOutputBufferR.begin(), mOutputBufferR.end(), 0.0f);
 
-    // 2048 Samples Vorlaufpuffer initial in beide Ausgangs-FIFOs schreiben
     const int preBufferSamples = 2048;
     int s1, sz1, s2, sz2;
 
@@ -107,7 +143,7 @@ void DDSPAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
 
     if (totalNumInputChannels == 0 || numSamples == 0) return;
 
-    // 1. Eingangssignal (Mono-Summe) in Input-FIFO schreiben
+    // 1. Mono-Summe in Eingangs-FIFO schreiben
     const float* inL = buffer.getReadPointer(0);
     const float* inR = totalNumInputChannels > 1 ? buffer.getReadPointer(1) : inL;
 
@@ -121,8 +157,10 @@ void DDSPAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
         mInputBuffer[start2 + i] = 0.5f * (inL[size1 + i] + inR[size1 + i]);
     }
     mInputFifo.finishedWrite(numSamples);
+
     if (mWorker != nullptr) mWorker->notify();
 
+    // Offline-Bouncing Synchronisation
     if (isNonRealtime() && mWorker != nullptr) {
         while (mOutputFifoL.getNumReady() < numSamples && mWorker->isThreadRunning()) {
             mWorker->notify();
