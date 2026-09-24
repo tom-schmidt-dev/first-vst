@@ -1,0 +1,71 @@
+# ==========================================
+# C++ / CMake / Build-Artefakte
+# ==========================================
+build/
+*/build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.o
+*.o.d
+*.a
+*.so
+*.dylib
+*.dll
+
+# Artefakt-Ordner aus JUCE-Builds
+*_artefacts/
+JUCEConfig*.cmake
+
+# ==========================================
+# Plugin-Binaries & VST3-Builds
+# ==========================================
+*.vst3/
+*.vst/
+*.component/
+*.app/
+
+# ==========================================
+# Datensätze & Audio (data/)
+# ==========================================
+data/
+*.h5
+*.hdf5
+*.wav
+*.mp3
+*.ogg
+*.caf
+*.flac
+
+# ==========================================
+# ML-Modelle & Checkpoints
+# ==========================================
+checkpoints/
+exported_models/
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.ckpt
+
+# ==========================================
+# Python & Umgebungen
+# ==========================================
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# ==========================================
+# IDEs & Betriebssystem
+# ==========================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
