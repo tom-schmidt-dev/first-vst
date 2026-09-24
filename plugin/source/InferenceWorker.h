@@ -47,11 +47,19 @@ public:
         mTiltParam         = apvts.getRawParameterValue("spectral_tilt");
         mTransientParam    = apvts.getRawParameterValue("transient_track");
         mNoiseGainParam    = apvts.getRawParameterValue("noise_gain");
+
         mSubOctParam       = apvts.getRawParameterValue("sub_octave");
         mSubSemiParam      = apvts.getRawParameterValue("sub_semitones");
         mHighOctParam      = apvts.getRawParameterValue("high_octave");
         mHighSemiParam     = apvts.getRawParameterValue("high_semitones");
-        
+
+        mHigh2GainParam    = apvts.getRawParameterValue("high2_gain");
+        mHigh2OctParam     = apvts.getRawParameterValue("high2_octave");
+        mHigh2SemiParam    = apvts.getRawParameterValue("high2_semitones");
+
+        mHigh3GainParam    = apvts.getRawParameterValue("high3_gain");
+        mHigh3OctParam     = apvts.getRawParameterValue("high3_octave");
+        mHigh3SemiParam    = apvts.getRawParameterValue("high3_semitones");
 
         Ort::SessionOptions sessionOptions;
         sessionOptions.SetIntraOpNumThreads(1);
@@ -92,7 +100,6 @@ public:
             300.0f, 600.0f, 1000.0f, 1600.0f, 2400.0f, 3400.0f, 4800.0f, 7000.0f
         };
 
-        // Filterkoeffizient für das One-Pole-Rauschfilter (~2.800 Hz Tiefpass)
         const float noiseCutoff = 2800.0f;
         const float noiseAlpha  = 1.0f - std::exp(-6.2831853f * noiseCutoff / mSampleRate);
 
@@ -113,7 +120,7 @@ public:
                 if (size2 > 0) std::copy_n(&mInputStorage[start2], size2, chunkBuffer.begin() + size1);
                 mInputFifo.finishedRead(static_cast<int>(hopSize));
 
-                // 2. Features extrahieren
+                // 2. Feature-Extraktion
                 const float tolerance = mToleranceParam ? mToleranceParam->load() : 0.70f;
                 float detectedPitch = mPitchTracker.processBlock(chunkBuffer.data(), hopSize, tolerance);
                 float normalizedLoudness = mLoudnessExtractor.processBlock(chunkBuffer.data(), hopSize);
@@ -138,7 +145,7 @@ public:
                 std::sort(sortedPitches.begin(), sortedPitches.end());
                 float filteredPitch = sortedPitches[1];
 
-                // Oktavierung in den spielbaren Bereich
+                // Oktavierung in spielbaren Bereich
                 float playPitch = filteredPitch;
                 while (playPitch > 0.0f && playPitch < 196.0f) {
                     playPitch *= 2.0f;
@@ -182,6 +189,18 @@ public:
                 const float transientTrack = mTransientParam ? mTransientParam->load() : 0.5f;
                 const float noiseGain      = mNoiseGainParam ? mNoiseGainParam->load() : 0.2f;
 
+                const float subOct         = mSubOctParam ? mSubOctParam->load() : -1.0f;
+                const float subSemi        = mSubSemiParam ? mSubSemiParam->load() : 0.0f;
+                const float high1Oct       = mHighOctParam ? mHighOctParam->load() : 1.0f;
+                const float high1Semi      = mHighSemiParam ? mHighSemiParam->load() : 0.0f;
+                const float high2Oct       = mHigh2OctParam ? mHigh2OctParam->load() : 2.0f;
+                const float high2Semi      = mHigh2SemiParam ? mHigh2SemiParam->load() : 0.0f;
+                const float high3Oct       = mHigh3OctParam ? mHigh3OctParam->load() : 1.0f;
+                const float high3Semi      = mHigh3SemiParam ? mHigh3SemiParam->load() : 7.0f;
+
+                const float high2Gain      = mHigh2GainParam ? mHigh2GainParam->load() : 0.0f;
+                const float high3Gain      = mHigh3GainParam ? mHigh3GainParam->load() : 0.0f;
+
                 // 5. Dynamische Transienten-Ansprache
                 const bool isSounding = (normalizedLoudness > 0.06f);
                 const float targetAmp = isSounding ? overallAmp : 0.0f;
@@ -214,7 +233,6 @@ public:
                     for (size_t b = 0; b < 8; ++b) {
                         formantMags[b] /= maxFormant;
                     }
-                    // Sanfte Dämpfung der beiden obersten Formantbänder gegen Pfeifen
                     formantMags[6] *= 0.65f;
                     formantMags[7] *= 0.40f;
                 }
@@ -245,41 +263,37 @@ public:
                     mCurrAmps[h] = harmAmp;
                 }
 
+                // 8. Oszillatoren mit 7 Stimmen berechnen
                 float synthTargetF0 = (playPitch >= 50.0f) ? playPitch : (mPrevF0 > 0.0f ? mPrevF0 : 220.0f);
 
-                // Pitch-Multiplikatoren aus Oktaven und Halbtönen berechnen
-                const float subOct   = mSubOctParam ? mSubOctParam->load() : -1.0f;
-                const float subSemi  = mSubSemiParam ? mSubSemiParam->load() : 0.0f;
-                const float highOct  = mHighOctParam ? mHighOctParam->load() : 1.0f;
-                const float highSemi = mHighSemiParam ? mHighSemiParam->load() : 0.0f;
+                const float subPitchMult   = std::pow(2.0f, (subOct * 12.0f + subSemi) / 12.0f);
+                const float high1PitchMult = std::pow(2.0f, (high1Oct * 12.0f + high1Semi) / 12.0f);
+                const float high2PitchMult = std::pow(2.0f, (high2Oct * 12.0f + high2Semi) / 12.0f);
+                const float high3PitchMult = std::pow(2.0f, (high3Oct * 12.0f + high3Semi) / 12.0f);
 
-                const float subPitchMult  = std::pow(2.0f, (subOct * 12.0f + subSemi) / 12.0f);
-                const float highPitchMult = std::pow(2.0f, (highOct * 12.0f + highSemi) / 12.0f);
-
-                // Dynamischer Tilt: 0.0 = dunkel (1.800 Hz), 1.0 = voll geöffnet (14.000 Hz)
-                const float bodyCutoffHz = 2200.0f + (1.0f - spectralTilt) * 4300.0f;
+                const float bodyCutoffHz = 1800.0f + spectralTilt * 12200.0f;
                 const float tiltGainComp = 1.0f + (1.0f - spectralTilt) * 1.2f;
 
-                // 8. Oszillatoren mit variabler Tonhöhe und Korpusfilter berechnen
                 mSynthesizer.processBlock(
                     mPrevF0 > 0.0f ? mPrevF0 : synthTargetF0,
                     synthTargetF0,
                     mPrevAmps.data(), mCurrAmps.data(),
                     synthBufferL.data(), synthBufferR.data(), hopSize,
-                    detuneCents, stereoSpread, subGain, highGain,
-                    bodyCutoffHz, subPitchMult, highPitchMult
+                    detuneCents, stereoSpread,
+                    subGain, highGain, high2Gain, high3Gain,
+                    bodyCutoffHz,
+                    subPitchMult, high1PitchMult, high2PitchMult, high3PitchMult
                 );
 
                 mPrevF0 = synthTargetF0;
                 mPrevAmps = mCurrAmps;
 
-                // Pegelausgleich für die Dämpfung bei geschlossenem Tilt
                 for (size_t i = 0; i < hopSize; ++i) {
                     synthBufferL[i] *= tiltGainComp;
                     synthBufferR[i] *= tiltGainComp;
                 }
 
-                // 9. Kontinuierlicher Rauschsynthesizer (ohne Sinusschwingungen)
+                // 9. Kontinuierlicher Rauschsynthesizer
                 std::fill(noiseBuffer.begin(), noiseBuffer.end(), 0.0f);
                 if (noiseGain > 0.001f && isSounding && noiseBinCount > 0) {
                     float totalNoiseMag = 0.0f;
@@ -290,11 +304,8 @@ public:
                     const float meanNoiseMag = totalNoiseMag / static_cast<float>(binsToCheck);
 
                     for (size_t i = 0; i < hopSize; ++i) {
-                        // Kontinuierliches weißes Rauschen [-1.0, 1.0]
                         const float rawRandom = (static_cast<float>(std::rand()) / (static_cast<float>(RAND_MAX) * 0.5f)) - 1.0f;
-                        // Zustand des Tiefpassfilters aktualisieren
                         mNoiseFilterState += noiseAlpha * (rawRandom - mNoiseFilterState);
-
                         noiseBuffer[i] = mNoiseFilterState * meanNoiseMag * noiseGain * smoothedAmp * 2.0f;
                     }
                 }
@@ -347,6 +358,14 @@ private:
     std::atomic<float>* mHighOctParam   = nullptr;
     std::atomic<float>* mHighSemiParam  = nullptr;
 
+    std::atomic<float>* mHigh2GainParam = nullptr;
+    std::atomic<float>* mHigh2OctParam  = nullptr;
+    std::atomic<float>* mHigh2SemiParam = nullptr;
+
+    std::atomic<float>* mHigh3GainParam = nullptr;
+    std::atomic<float>* mHigh3OctParam  = nullptr;
+    std::atomic<float>* mHigh3SemiParam = nullptr;
+
     float mSampleRate;
     PitchTracker mPitchTracker;
     LoudnessExtractor mLoudnessExtractor;
@@ -360,6 +379,5 @@ private:
     std::vector<float> mPrevAmps;
     std::vector<float> mCurrAmps;
 
-    // Filterzustand für stochastisches Rauschen
     float mNoiseFilterState = 0.0f;
 };

@@ -75,7 +75,27 @@ juce::AudioProcessorValueTreeState::ParameterLayout DDSPAudioProcessor::createPa
     params.push_back(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{"high_semitones", 1}, "High Semitones", -12, 12, 0));
 
-    
+    // High Voice 2
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"high2_gain", 1}, "High 2 Level",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.00f));
+
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"high2_octave", 1}, "High 2 Octave Shift", -1, 3, 2));
+
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"high2_semitones", 1}, "High 2 Semitones", -12, 12, 0));
+
+    // High Voice 3
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"high3_gain", 1}, "High 3 Level",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.00f));
+
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"high3_octave", 1}, "High 3 Octave Shift", -1, 3, 1));
+
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"high3_semitones", 1}, "High 3 Semitones", -12, 12, 7));
 
     return { params.begin(), params.end() };
 }
