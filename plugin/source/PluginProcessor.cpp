@@ -10,7 +10,12 @@ DDSPAudioProcessor::DDSPAudioProcessor()
       mOutputBufferL(fifoCapacity, 0.0f),
       mOutputBufferR(fifoCapacity, 0.0f)
 {
-    mDryWetParam = apvts.getRawParameterValue("dry_wet");
+    mDryWetParam      = apvts.getRawParameterValue("dry_wet");
+    mLfoDepthParam    = apvts.getRawParameterValue("lfo_depth");
+    mLfoWaveParam     = apvts.getRawParameterValue("lfo_wave");
+    mLfoSyncParam     = apvts.getRawParameterValue("lfo_sync_mode");
+    mLfoRateHzParam   = apvts.getRawParameterValue("lfo_rate_hz");
+    mLfoRateSyncParam = apvts.getRawParameterValue("lfo_rate_sync");
 }
 
 DDSPAudioProcessor::~DDSPAudioProcessor() {
@@ -20,7 +25,7 @@ DDSPAudioProcessor::~DDSPAudioProcessor() {
 juce::AudioProcessorValueTreeState::ParameterLayout DDSPAudioProcessor::createParameterLayout() {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
-    // Reihe 1: Synthese & Raum
+    // Sektion 1: Master, LFO & Timbre
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"dry_wet", 1}, "Dry / Wet",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.70f));
@@ -34,25 +39,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout DDSPAudioProcessor::createPa
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.80f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{"sub_gain", 1}, "Sub Octave",
-        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.35f));
-
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{"high_gain", 1}, "High Octave",
-        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.20f));
-
-    // Reihe 2: Gesangs- & Timbre-Adaption
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{"tracking_tolerance", 1}, "Tolerance",
-        juce::NormalisableRange<float>(0.30f, 0.95f, 0.01f), 0.70f));
+        juce::ParameterID{"spectral_tilt", 1}, "Dynamic Tilt",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.60f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"formant_blend", 1}, "Formant Match",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.50f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{"spectral_tilt", 1}, "Dynamic Tilt",
-        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.60f));
+        juce::ParameterID{"tracking_tolerance", 1}, "Tolerance",
+        juce::NormalisableRange<float>(0.30f, 0.95f, 0.01f), 0.70f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"transient_track", 1}, "Attack Track",
@@ -62,46 +58,109 @@ juce::AudioProcessorValueTreeState::ParameterLayout DDSPAudioProcessor::createPa
         juce::ParameterID{"noise_gain", 1}, "Noise / Breath",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.20f));
 
-    // Voice Pitch Tuning
-    params.push_back(std::make_unique<juce::AudioParameterInt>(
-        juce::ParameterID{"sub_octave", 1}, "Sub Octave Shift", -3, 1, -1));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"lfo_depth", 1}, "LFO Depth",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
 
-    params.push_back(std::make_unique<juce::AudioParameterInt>(
-        juce::ParameterID{"sub_semitones", 1}, "Sub Semitones", -12, 12, 0));
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"lfo_wave", 1}, "LFO Waveform",
+        juce::StringArray{"Sine", "Triangle", "Saw Up", "Saw Down", "Square", "S&H"}, 0));
 
-    params.push_back(std::make_unique<juce::AudioParameterInt>(
-        juce::ParameterID{"high_octave", 1}, "High Octave Shift", -1, 3, 1));
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"lfo_sync_mode", 1}, "LFO Sync Mode",
+        juce::StringArray{"Free (Hz)", "Tempo Sync"}, 0));
 
-    params.push_back(std::make_unique<juce::AudioParameterInt>(
-        juce::ParameterID{"high_semitones", 1}, "High Semitones", -12, 12, 0));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"lfo_rate_hz", 1}, "LFO Rate Hz",
+        juce::NormalisableRange<float>(0.05f, 20.0f, 0.01f, 0.35f), 2.0f));
 
-    // High Voice 2
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"lfo_rate_sync", 1}, "LFO Rate Sync",
+        juce::StringArray{"1/32", "1/16", "1/8", "1/4", "1/2", "1/1", "2/1", "4/1", "1/8T", "1/4T"}, 3));
+
+    // Sektion 2: Monophonic Pitch Modifiers
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"pitch_quantize", 1}, "Pitch Quantize",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"pitch_inertia", 1}, "Pitch Inertia (ms)",
+        juce::NormalisableRange<float>(0.0f, 1500.0f, 1.0f, 0.4f), 0.0f));
+
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"pitch_freeze", 1}, "Pitch Freeze",
+        juce::StringArray{"Tracking", "Freeze"}, 0));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"pitch_inversion", 1}, "Pitch Invert",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"voice_drift", 1}, "Voice Drift (Cents)",
+        juce::NormalisableRange<float>(0.0f, 50.0f, 0.1f), 0.0f));
+
+    // Sektion 3: Harmony Matrix & Warp Modes
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"harmony_balance", 1}, "Harmony Balance",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.50f));
+
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"mix_mode", 1}, "Mix Mode",
+        juce::StringArray{"Add", "Ring Mod", "Phase Mod (FM)"}, 0));
+
+    juce::StringArray waveChoices{"Sine", "Saw", "Square", "Triangle"};
+
+    // Sub Voice
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"sub_gain", 1}, "Sub Level",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.35f));
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"sub_octave", 1}, "Sub Oct", -3, 1, -1));
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"sub_semitones", 1}, "Sub Semi", -12, 12, 0));
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"sub_wave", 1}, "Sub Wave", waveChoices, 0));
+
+    // High 1 Voice
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"high_gain", 1}, "High 1 Level",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.20f));
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"high_octave", 1}, "High 1 Oct", -1, 3, 1));
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"high_semitones", 1}, "High 1 Semi", -12, 12, 0));
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"high1_wave", 1}, "High 1 Wave", waveChoices, 0));
+
+    // High 2 Voice
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"high2_gain", 1}, "High 2 Level",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.00f));
-
     params.push_back(std::make_unique<juce::AudioParameterInt>(
-        juce::ParameterID{"high2_octave", 1}, "High 2 Octave Shift", -1, 3, 2));
-
+        juce::ParameterID{"high2_octave", 1}, "High 2 Oct", -1, 3, 2));
     params.push_back(std::make_unique<juce::AudioParameterInt>(
-        juce::ParameterID{"high2_semitones", 1}, "High 2 Semitones", -12, 12, 0));
+        juce::ParameterID{"high2_semitones", 1}, "High 2 Semi", -12, 12, 0));
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"high2_wave", 1}, "High 2 Wave", waveChoices, 0));
 
-    // High Voice 3
+    // High 3 Voice
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"high3_gain", 1}, "High 3 Level",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.00f));
-
     params.push_back(std::make_unique<juce::AudioParameterInt>(
-        juce::ParameterID{"high3_octave", 1}, "High 3 Octave Shift", -1, 3, 1));
-
+        juce::ParameterID{"high3_octave", 1}, "High 3 Oct", -1, 3, 1));
     params.push_back(std::make_unique<juce::AudioParameterInt>(
-        juce::ParameterID{"high3_semitones", 1}, "High 3 Semitones", -12, 12, 7));
+        juce::ParameterID{"high3_semitones", 1}, "High 3 Semi", -12, 12, 7));
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"high3_wave", 1}, "High 3 Wave", waveChoices, 0));
 
     return { params.begin(), params.end() };
 }
 
 void DDSPAudioProcessor::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
     setLatencySamples(2048);
+    mLfo.setSampleRate(static_cast<float>(sampleRate));
+    mLfo.reset();
 
     juce::File currentBinary = juce::File::getSpecialLocation(juce::File::currentExecutableFile);
     juce::File modelFile = currentBinary.getSiblingFile("ddsp_decoder.onnx");
@@ -125,6 +184,7 @@ void DDSPAudioProcessor::reset() {
     mInputFifo.reset();
     mOutputFifoL.reset();
     mOutputFifoR.reset();
+    mLfo.reset();
 
     std::fill(mInputBuffer.begin(), mInputBuffer.end(), 0.0f);
     std::fill(mOutputBufferL.begin(), mOutputBufferL.end(), 0.0f);
@@ -163,7 +223,7 @@ void DDSPAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
 
     if (totalNumInputChannels == 0 || numSamples == 0) return;
 
-    // 1. Mono-Summe in Eingangs-FIFO schreiben
+    // 1. Mono-Signal in Eingangs-FIFO schreiben
     const float* inL = buffer.getReadPointer(0);
     const float* inR = totalNumInputChannels > 1 ? buffer.getReadPointer(1) : inL;
 
@@ -180,7 +240,6 @@ void DDSPAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
 
     if (mWorker != nullptr) mWorker->notify();
 
-    // Offline-Bouncing Synchronisation
     if (isNonRealtime() && mWorker != nullptr) {
         while (mOutputFifoL.getNumReady() < numSamples && mWorker->isThreadRunning()) {
             mWorker->notify();
@@ -188,7 +247,31 @@ void DDSPAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
         }
     }
 
-    // 2. Synthetisierte Audiodaten aus Stereo-FIFOs lesen
+    // 2. LFO-Frequenz ermitteln
+    const float lfoDepth       = mLfoDepthParam ? mLfoDepthParam->load() : 0.0f;
+    const int lfoWaveIdx       = mLfoWaveParam ? static_cast<int>(mLfoWaveParam->load()) : 0;
+    const int lfoSyncIdx       = mLfoSyncParam ? static_cast<int>(mLfoSyncParam->load()) : 0;
+    const float lfoRateHz      = mLfoRateHzParam ? mLfoRateHzParam->load() : 2.0f;
+    const int lfoRateSyncIdx   = mLfoRateSyncParam ? static_cast<int>(mLfoRateSyncParam->load()) : 3;
+
+    float effectiveLfoFreq = lfoRateHz;
+    if (lfoSyncIdx == 1) {
+        double bpm = 120.0;
+        if (auto* playHead = getPlayHead()) {
+            if (auto pos = playHead->getPosition()) {
+                if (pos->getBpm().hasValue()) {
+                    bpm = *pos->getBpm();
+                }
+            }
+        }
+        static const float beatDivisions[] = { 0.125f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 0.33333f, 0.66667f };
+        const float beats = beatDivisions[std::clamp(lfoRateSyncIdx, 0, 9)];
+        effectiveLfoFreq = static_cast<float>((bpm / 60.0) / beats);
+    }
+
+    const auto lfoWaveform = static_cast<LFOWaveform>(std::clamp(lfoWaveIdx, 0, 5));
+
+    // 3. Ausgangsdaten lesen und LFO auf Wet-Pfad anwenden
     const float dryWet = mDryWetParam ? mDryWetParam->load() : 0.7f;
     float* channelDataL = buffer.getWritePointer(0);
     float* channelDataR = totalNumOutputChannels > 1 ? buffer.getWritePointer(1) : nullptr;
@@ -208,8 +291,14 @@ void DDSPAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
             const float dryL = channelDataL[i];
             const float dryR = channelDataR ? channelDataR[i] : dryL;
 
-            const float wetL = (i < readSize1L) ? mOutputBufferL[readStart1L + i] : mOutputBufferL[readStart2L + (i - readSize1L)];
-            const float wetR = (i < readSize1R) ? mOutputBufferR[readStart1R + i] : mOutputBufferR[readStart2R + (i - readSize1R)];
+            const float rawWetL = (i < readSize1L) ? mOutputBufferL[readStart1L + i] : mOutputBufferL[readStart2L + (i - readSize1L)];
+            const float rawWetR = (i < readSize1R) ? mOutputBufferR[readStart1R + i] : mOutputBufferR[readStart2R + (i - readSize1R)];
+
+            const float lfoVal = mLfo.processSample(effectiveLfoFreq, lfoWaveform);
+            const float lfoGain = 1.0f - lfoDepth * 0.5f * (1.0f - lfoVal);
+
+            const float wetL = rawWetL * lfoGain;
+            const float wetR = rawWetR * lfoGain;
 
             channelDataL[i] = (1.0f - dryWet) * dryL + dryWet * wetL;
             if (channelDataR) {

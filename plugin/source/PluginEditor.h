@@ -13,7 +13,7 @@ public:
 private:
     DDSPAudioProcessor& processorRef;
 
-    // Reihe 1: Master & Ensemble
+    // Sektion 1: Master, LFO & Timbre
     juce::Slider mDryWetSlider;
     juce::Label  mDryWetLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mDryWetAttach;
@@ -34,7 +34,6 @@ private:
     juce::Label  mFormantLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mFormantAttach;
 
-    // Reihe 2: Tracking & Dynamics
     juce::Slider mToleranceSlider;
     juce::Label  mToleranceLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mToleranceAttach;
@@ -47,55 +46,80 @@ private:
     juce::Label  mNoiseGainLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mNoiseGainAttach;
 
-    // Reihe 3: Sub & High 1
-    juce::Slider mSubGainSlider;
-    juce::Label  mSubGainLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mSubGainAttach;
+    juce::Slider mLfoDepthSlider;
+    juce::Label  mLfoDepthLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mLfoDepthAttach;
 
-    juce::Slider mSubOctSlider;
-    juce::Label  mSubOctLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mSubOctAttach;
+    juce::ComboBox mLfoWaveCombo;
+    juce::Label    mLfoWaveLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mLfoWaveAttach;
 
-    juce::Slider mSubSemiSlider;
-    juce::Label  mSubSemiLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mSubSemiAttach;
+    juce::ComboBox mLfoSyncCombo;
+    juce::Label    mLfoSyncLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mLfoSyncAttach;
 
-    juce::Slider mHigh1GainSlider;
-    juce::Label  mHigh1GainLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mHigh1GainAttach;
+    juce::Slider   mLfoRateHzSlider;
+    juce::Label    mLfoRateHzLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mLfoRateHzAttach;
 
-    juce::Slider mHigh1OctSlider;
-    juce::Label  mHigh1OctLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mHigh1OctAttach;
+    juce::ComboBox mLfoRateSyncCombo;
+    juce::Label    mLfoRateSyncLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mLfoRateSyncAttach;
 
-    juce::Slider mHigh1SemiSlider;
-    juce::Label  mHigh1SemiLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mHigh1SemiAttach;
+    // Sektion 2: Monophonic Pitch Modifiers
+    juce::Slider mPitchQuantSlider;
+    juce::Label  mPitchQuantLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mPitchQuantAttach;
 
-    // Reihe 4: High 2 & High 3
-    juce::Slider mHigh2GainSlider;
-    juce::Label  mHigh2GainLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mHigh2GainAttach;
+    juce::Slider mPitchInertiaSlider;
+    juce::Label  mPitchInertiaLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mPitchInertiaAttach;
 
-    juce::Slider mHigh2OctSlider;
-    juce::Label  mHigh2OctLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mHigh2OctAttach;
+    juce::ComboBox mPitchFreezeCombo;
+    juce::Label    mPitchFreezeLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mPitchFreezeAttach;
 
-    juce::Slider mHigh2SemiSlider;
-    juce::Label  mHigh2SemiLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mHigh2SemiAttach;
+    juce::Slider mPitchInvertSlider;
+    juce::Label  mPitchInvertLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mPitchInvertAttach;
 
-    juce::Slider mHigh3GainSlider;
-    juce::Label  mHigh3GainLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mHigh3GainAttach;
+    juce::Slider mVoiceDriftSlider;
+    juce::Label  mVoiceDriftLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mVoiceDriftAttach;
 
-    juce::Slider mHigh3OctSlider;
-    juce::Label  mHigh3OctLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mHigh3OctAttach;
+    // Sektion 3: Harmony Matrix & Warp Modes
+    juce::Slider mHarmBalanceSlider;
+    juce::Label  mHarmBalanceLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mHarmBalanceAttach;
 
-    juce::Slider mHigh3SemiSlider;
-    juce::Label  mHigh3SemiLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mHigh3SemiAttach;
+    juce::ComboBox mMixModeCombo;
+    juce::Label    mMixModeLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mMixModeAttach;
+
+    struct VoiceControls {
+        juce::Slider   gainSlider;
+        juce::Label    gainLabel;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> gainAttach;
+
+        juce::Slider   octSlider;
+        juce::Label    octLabel;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> octAttach;
+
+        juce::Slider   semiSlider;
+        juce::Label    semiLabel;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> semiAttach;
+
+        juce::ComboBox waveCombo;
+        juce::Label    waveLabel;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> waveAttach;
+    };
+
+    VoiceControls mSubVoice;
+    VoiceControls mHigh1Voice;
+    VoiceControls mHigh2Voice;
+    VoiceControls mHigh3Voice;
+
+    void updateLfoRateControls();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DDSPAudioProcessorEditor)
 };

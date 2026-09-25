@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "InferenceWorker.h"
+#include "../../dsp/include/LFO.hpp"
 
 class DDSPAudioProcessor : public juce::AudioProcessor {
 public:
@@ -34,17 +35,26 @@ public:
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    static constexpr size_t fifoCapacity = 8192;
+    static constexpr int fifoCapacity = 8192;
+
     juce::AbstractFifo mInputFifo{fifoCapacity};
     std::vector<float> mInputBuffer;
 
     juce::AbstractFifo mOutputFifoL{fifoCapacity};
     std::vector<float> mOutputBufferL;
+
     juce::AbstractFifo mOutputFifoR{fifoCapacity};
     std::vector<float> mOutputBufferR;
 
     std::unique_ptr<InferenceWorker> mWorker;
-    std::atomic<float>* mDryWetParam = nullptr;
+    LFO mLfo;
+
+    std::atomic<float>* mDryWetParam      = nullptr;
+    std::atomic<float>* mLfoDepthParam    = nullptr;
+    std::atomic<float>* mLfoWaveParam     = nullptr;
+    std::atomic<float>* mLfoSyncParam     = nullptr;
+    std::atomic<float>* mLfoRateHzParam   = nullptr;
+    std::atomic<float>* mLfoRateSyncParam = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DDSPAudioProcessor)
 };
