@@ -1,53 +1,132 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "PluginProcessor.h"
+#include "SequencerComponent.h"
 
-class DDSPAudioProcessorEditor : public juce::AudioProcessorEditor {
+class DragSlider : public juce::Slider {
+public:
+    DragSlider() {
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+    }
+    juce::MouseCursor getMouseCursor() override {
+        return juce::MouseCursor::NormalCursor;
+    }
+};
+
+class NumberDragSlider : public juce::Slider {
+public:
+    NumberDragSlider() {
+        setSliderStyle(juce::Slider::LinearBarVertical);
+        setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+    }
+
+    juce::MouseCursor getMouseCursor() override {
+        return juce::MouseCursor::NormalCursor;
+    }
+
+    void mouseDown(const juce::MouseEvent& e) override {
+        mLastY = e.position.y;
+        juce::Slider::mouseDown(e);
+    }
+
+    void mouseDrag(const juce::MouseEvent& e) override {
+        const float dy = mLastY - e.position.y;
+        mLastY = e.position.y;
+
+        const double range = getMaximum() - getMinimum();
+        const double factor = e.mods.isShiftDown() ? 0.001 : 0.005;
+        const double delta = dy * range * factor;
+
+        setValue(std::clamp(getValue() + delta, getMinimum(), getMaximum()), juce::sendNotificationSync);
+    }
+
+    void paint(juce::Graphics& g) override {
+        auto bounds = getLocalBounds().toFloat();
+
+        g.setColour(isEnabled() ? juce::Colour(0xff222630) : juce::Colour(0xff181a1f));
+        g.fillRoundedRectangle(bounds, 4.0f);
+        g.setColour(isEnabled() ? juce::Colour(0xff3d4453) : juce::Colour(0xff282c35));
+        g.drawRoundedRectangle(bounds, 4.0f, 1.0f);
+
+        const double norm = (getValue() - getMinimum()) / (getMaximum() - getMinimum());
+        auto fillBounds = bounds.reduced(1.5f);
+        fillBounds.setWidth(fillBounds.getWidth() * static_cast<float>(std::clamp(norm, 0.0, 1.0)));
+        g.setColour(mFillColour.withAlpha(isEnabled() ? 0.35f : 0.12f));
+        g.fillRoundedRectangle(fillBounds, 3.0f);
+
+        g.setColour(isEnabled() ? juce::Colours::white : juce::Colour(0xff6a7280));
+        g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+
+        juce::String text = getTextFromValue(getValue());
+        if (mSuffix.isNotEmpty() && !text.endsWith(mSuffix)) text += mSuffix;
+
+        g.drawText(text, bounds, juce::Justification::centred, true);
+    }
+
+    void setCustomSuffix(const juce::String& s) { mSuffix = s; }
+    void setFillColour(juce::Colour c) { mFillColour = c; repaint(); }
+
+private:
+    float mLastY = 0.0f;
+    juce::Colour mFillColour{ 0xff4a90e2 };
+    juce::String mSuffix;
+};
+
+class DDSPAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::Timer {
 public:
     explicit DDSPAudioProcessorEditor(DDSPAudioProcessor&);
-    ~DDSPAudioProcessorEditor() override = default;
+    ~DDSPAudioProcessorEditor() override;
 
     void paint(juce::Graphics&) override;
     void resized() override;
 
+    juce::MouseCursor getMouseCursor() override {
+        return juce::MouseCursor::NormalCursor;
+    }
+
 private:
+    void timerCallback() override;
+    void updateLfoRateControls();
+    void updateAutomationState();
+
     DDSPAudioProcessor& processorRef;
 
     // Sektion 1: Master, LFO & Timbre
-    juce::Slider mDryWetSlider;
-    juce::Label  mDryWetLabel;
+    DragSlider mDryWetSlider;
+    juce::Label mDryWetLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mDryWetAttach;
 
-    juce::Slider mDetuneSlider;
-    juce::Label  mDetuneLabel;
+    DragSlider mDetuneSlider;
+    juce::Label mDetuneLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mDetuneAttach;
 
-    juce::Slider mSpreadSlider;
-    juce::Label  mSpreadLabel;
+    DragSlider mSpreadSlider;
+    juce::Label mSpreadLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mSpreadAttach;
 
-    juce::Slider mTiltSlider;
-    juce::Label  mTiltLabel;
+    DragSlider mTiltSlider;
+    juce::Label mTiltLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mTiltAttach;
 
-    juce::Slider mFormantSlider;
-    juce::Label  mFormantLabel;
+    DragSlider mFormantSlider;
+    juce::Label mFormantLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mFormantAttach;
 
-    juce::Slider mToleranceSlider;
-    juce::Label  mToleranceLabel;
+    DragSlider mToleranceSlider;
+    juce::Label mToleranceLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mToleranceAttach;
 
-    juce::Slider mTransientSlider;
-    juce::Label  mTransientLabel;
+    DragSlider mTransientSlider;
+    juce::Label mTransientLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mTransientAttach;
 
-    juce::Slider mNoiseGainSlider;
-    juce::Label  mNoiseGainLabel;
+    DragSlider mNoiseGainSlider;
+    juce::Label mNoiseGainLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mNoiseGainAttach;
 
-    juce::Slider mLfoDepthSlider;
-    juce::Label  mLfoDepthLabel;
+    DragSlider mLfoDepthSlider;
+    juce::Label mLfoDepthLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mLfoDepthAttach;
 
     juce::ComboBox mLfoWaveCombo;
@@ -58,8 +137,8 @@ private:
     juce::Label    mLfoSyncLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mLfoSyncAttach;
 
-    juce::Slider   mLfoRateHzSlider;
-    juce::Label    mLfoRateHzLabel;
+    NumberDragSlider mLfoRateHzSlider;
+    juce::Label      mLfoRateHzLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mLfoRateHzAttach;
 
     juce::ComboBox mLfoRateSyncCombo;
@@ -67,29 +146,29 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mLfoRateSyncAttach;
 
     // Sektion 2: Monophonic Pitch Modifiers
-    juce::Slider mPitchQuantSlider;
-    juce::Label  mPitchQuantLabel;
+    DragSlider mPitchQuantSlider;
+    juce::Label mPitchQuantLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mPitchQuantAttach;
 
-    juce::Slider mPitchInertiaSlider;
-    juce::Label  mPitchInertiaLabel;
+    DragSlider mPitchInertiaSlider;
+    juce::Label mPitchInertiaLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mPitchInertiaAttach;
 
     juce::ComboBox mPitchFreezeCombo;
     juce::Label    mPitchFreezeLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mPitchFreezeAttach;
 
-    juce::Slider mPitchInvertSlider;
-    juce::Label  mPitchInvertLabel;
+    DragSlider mPitchInvertSlider;
+    juce::Label mPitchInvertLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mPitchInvertAttach;
 
-    juce::Slider mVoiceDriftSlider;
-    juce::Label  mVoiceDriftLabel;
+    DragSlider mVoiceDriftSlider;
+    juce::Label mVoiceDriftLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mVoiceDriftAttach;
 
     // Sektion 3: Harmony Matrix & Warp Modes
-    juce::Slider mHarmBalanceSlider;
-    juce::Label  mHarmBalanceLabel;
+    NumberDragSlider mHarmBalanceSlider;
+    juce::Label      mHarmBalanceLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mHarmBalanceAttach;
 
     juce::ComboBox mMixModeCombo;
@@ -97,16 +176,16 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mMixModeAttach;
 
     struct VoiceControls {
-        juce::Slider   gainSlider;
-        juce::Label    gainLabel;
+        DragSlider   gainSlider;
+        juce::Label  gainLabel;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> gainAttach;
 
-        juce::Slider   octSlider;
-        juce::Label    octLabel;
+        DragSlider   octSlider;
+        juce::Label  octLabel;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> octAttach;
 
-        juce::Slider   semiSlider;
-        juce::Label    semiLabel;
+        DragSlider   semiSlider;
+        juce::Label  semiLabel;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> semiAttach;
 
         juce::ComboBox waveCombo;
@@ -119,7 +198,28 @@ private:
     VoiceControls mHigh2Voice;
     VoiceControls mHigh3Voice;
 
-    void updateLfoRateControls();
+    std::array<juce::ToggleButton, kNumTrackedParams> mSeqAutoButtons;
+
+    struct TrackedParamUI {
+        juce::Slider* slider = nullptr;
+        juce::Label*  label  = nullptr;
+    };
+    std::array<TrackedParamUI, kNumTrackedParams> mTrackedParamUIs;
+
+    // Sektion 4: Sequencer Canvas & Toolbar
+    SequencerCanvas mSeqCanvas;
+    juce::Viewport  mSeqViewport;
+
+    juce::ComboBox     mStepCountCombo;
+    juce::ComboBox     mGridSnapCombo;
+    juce::ComboBox     mCurveSelectCombo;
+    juce::ToggleButton mCurveVisibleToggle;
+
+    // Dynamische Begrenzungsrahmen für paint()
+    juce::Rectangle<int> mCard1Area;
+    juce::Rectangle<int> mCard2Area;
+    juce::Rectangle<int> mCard3Area;
+    juce::Rectangle<int> mCard4Area;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DDSPAudioProcessorEditor)
 };

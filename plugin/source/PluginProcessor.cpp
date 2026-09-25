@@ -110,7 +110,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout DDSPAudioProcessor::createPa
 
     juce::StringArray waveChoices{"Sine", "Saw", "Square", "Triangle"};
 
-    // Sub Voice
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"sub_gain", 1}, "Sub Level",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.35f));
@@ -121,7 +120,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout DDSPAudioProcessor::createPa
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{"sub_wave", 1}, "Sub Wave", waveChoices, 0));
 
-    // High 1 Voice
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"high_gain", 1}, "High 1 Level",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.20f));
@@ -132,7 +130,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout DDSPAudioProcessor::createPa
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{"high1_wave", 1}, "High 1 Wave", waveChoices, 0));
 
-    // High 2 Voice
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"high2_gain", 1}, "High 2 Level",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.00f));
@@ -143,7 +140,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout DDSPAudioProcessor::createPa
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{"high2_wave", 1}, "High 2 Wave", waveChoices, 0));
 
-    // High 3 Voice
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"high3_gain", 1}, "High 3 Level",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.00f));
@@ -173,7 +169,7 @@ void DDSPAudioProcessor::prepareToPlay(double sampleRate, int /*samplesPerBlock*
         mInputFifo, mInputBuffer,
         mOutputFifoL, mOutputBufferL,
         mOutputFifoR, mOutputBufferR,
-        apvts, modelFile, sampleRate
+        apvts, mSequencer, modelFile, sampleRate
     );
     mWorker->startThread(juce::Thread::Priority::highest);
 
@@ -223,7 +219,16 @@ void DDSPAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
 
     if (totalNumInputChannels == 0 || numSamples == 0) return;
 
-    // 1. Mono-Signal in Eingangs-FIFO schreiben
+    // 1. DAW Transport an Sequencer übergeben
+    if (auto* playHead = getPlayHead()) {
+        if (auto pos = playHead->getPosition()) {
+            const double ppq = pos->getPpqPosition().hasValue() ? *pos->getPpqPosition() : 0.0;
+            const bool isPlaying = pos->getIsPlaying();
+            mSequencer.updateTransport(ppq, isPlaying);
+        }
+    }
+
+    // 2. Mono-Eingangssignal in FIFO schreiben
     const float* inL = buffer.getReadPointer(0);
     const float* inR = totalNumInputChannels > 1 ? buffer.getReadPointer(1) : inL;
 
@@ -247,21 +252,29 @@ void DDSPAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
         }
     }
 
-    // 2. LFO-Frequenz ermitteln
-    const float lfoDepth       = mLfoDepthParam ? mLfoDepthParam->load() : 0.0f;
-    const int lfoWaveIdx       = mLfoWaveParam ? static_cast<int>(mLfoWaveParam->load()) : 0;
-    const int lfoSyncIdx       = mLfoSyncParam ? static_cast<int>(mLfoSyncParam->load()) : 0;
-    const float lfoRateHz      = mLfoRateHzParam ? mLfoRateHzParam->load() : 2.0f;
-    const int lfoRateSyncIdx   = mLfoRateSyncParam ? static_cast<int>(mLfoRateSyncParam->load()) : 3;
+    // 3. Sequencer-übersteuerte Parameter für Prozessor-Ebene ermitteln
+    const float dryWet = (mSequencer.isAutomated(0) && apvts.getParameter("dry_wet"))
+        ? denormaliseParam(apvts.getParameter("dry_wet")->getNormalisableRange(), mSequencer.getInterpolatedValue(0))
+        : (mDryWetParam ? mDryWetParam->load() : 0.7f);
+
+    const float lfoDepth = (mSequencer.isAutomated(8) && apvts.getParameter("lfo_depth"))
+        ? denormaliseParam(apvts.getParameter("lfo_depth")->getNormalisableRange(), mSequencer.getInterpolatedValue(8))
+        : (mLfoDepthParam ? mLfoDepthParam->load() : 0.0f);
+
+    const float lfoRateHz = (mSequencer.isAutomated(9) && apvts.getParameter("lfo_rate_hz"))
+        ? denormaliseParam(apvts.getParameter("lfo_rate_hz")->getNormalisableRange(), mSequencer.getInterpolatedValue(9))
+        : (mLfoRateHzParam ? mLfoRateHzParam->load() : 2.0f);
+
+    const int lfoWaveIdx     = mLfoWaveParam ? static_cast<int>(mLfoWaveParam->load()) : 0;
+    const int lfoSyncIdx     = mLfoSyncParam ? static_cast<int>(mLfoSyncParam->load()) : 0;
+    const int lfoRateSyncIdx = mLfoRateSyncParam ? static_cast<int>(mLfoRateSyncParam->load()) : 3;
 
     float effectiveLfoFreq = lfoRateHz;
     if (lfoSyncIdx == 1) {
         double bpm = 120.0;
         if (auto* playHead = getPlayHead()) {
             if (auto pos = playHead->getPosition()) {
-                if (pos->getBpm().hasValue()) {
-                    bpm = *pos->getBpm();
-                }
+                if (pos->getBpm().hasValue()) bpm = *pos->getBpm();
             }
         }
         static const float beatDivisions[] = { 0.125f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 0.33333f, 0.66667f };
@@ -271,8 +284,7 @@ void DDSPAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
 
     const auto lfoWaveform = static_cast<LFOWaveform>(std::clamp(lfoWaveIdx, 0, 5));
 
-    // 3. Ausgangsdaten lesen und LFO auf Wet-Pfad anwenden
-    const float dryWet = mDryWetParam ? mDryWetParam->load() : 0.7f;
+    // 4. Ausgangs-FIFOs lesen und LFO anwenden
     float* channelDataL = buffer.getWritePointer(0);
     float* channelDataR = totalNumOutputChannels > 1 ? buffer.getWritePointer(1) : nullptr;
 
@@ -328,13 +340,20 @@ juce::AudioProcessorEditor* DDSPAudioProcessor::createEditor() {
 void DDSPAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
+    auto seqXml = mSequencer.exportXml();
+    xml->addChildElement(seqXml.release());
     copyXmlToBinary(*xml, destData);
 }
 
 void DDSPAudioProcessor::setStateInformation(const void* data, int sizeInBytes) {
     std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
-    if (xmlState != nullptr && xmlState->hasTagName(apvts.state.getType())) {
-        apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+    if (xmlState != nullptr) {
+        if (xmlState->hasTagName(apvts.state.getType())) {
+            apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+        }
+        if (auto* seqXml = xmlState->getChildByName("SEQUENCER")) {
+            mSequencer.importXml(seqXml);
+        }
     }
 }
 

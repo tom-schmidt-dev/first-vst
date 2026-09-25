@@ -10,6 +10,7 @@
 #include "../../dsp/include/PitchTracker.hpp"
 #include "../../dsp/include/LoudnessExtractor.hpp"
 #include "../../dsp/include/HarmonicSynthesizer.hpp"
+#include "../../dsp/include/SequencerEngine.hpp"
 
 class InferenceWorker : public juce::Thread {
 public:
@@ -20,6 +21,7 @@ public:
                     juce::AbstractFifo& outputFifoR,
                     std::vector<float>& outputBufferR,
                     juce::AudioProcessorValueTreeState& apvts,
+                    SequencerEngine& sequencer,
                     const juce::File& onnxModelFile,
                     double sampleRate)
         : juce::Thread("DDSPInferenceWorker"),
@@ -29,6 +31,8 @@ public:
           mOutputStorageL(outputBufferL),
           mOutputFifoR(outputFifoR),
           mOutputStorageR(outputBufferR),
+          mApvts(apvts),
+          mSequencer(sequencer),
           mSampleRate(static_cast<float>(sampleRate)),
           mPitchTracker(2048, static_cast<float>(sampleRate), 0.35f),
           mLoudnessExtractor(-80.0f),
@@ -46,14 +50,12 @@ public:
         mTransientParam    = apvts.getRawParameterValue("transient_track");
         mNoiseGainParam    = apvts.getRawParameterValue("noise_gain");
 
-        // Pitch Modifiers
         mPitchQuantParam   = apvts.getRawParameterValue("pitch_quantize");
         mPitchInertiaParam = apvts.getRawParameterValue("pitch_inertia");
         mPitchFreezeParam  = apvts.getRawParameterValue("pitch_freeze");
         mPitchInvertParam  = apvts.getRawParameterValue("pitch_inversion");
         mVoiceDriftParam   = apvts.getRawParameterValue("voice_drift");
 
-        // Voices & Routing
         mHarmBalanceParam  = apvts.getRawParameterValue("harmony_balance");
         mMixModeParam      = apvts.getRawParameterValue("mix_mode");
 
@@ -141,7 +143,7 @@ public:
                 mInputFifo.finishedRead(static_cast<int>(hopSize));
 
                 // 2. Feature-Extraktion
-                const float tolerance = mToleranceParam ? mToleranceParam->load() : 0.70f;
+                const float tolerance = getEffectiveParam(5, "tracking_tolerance", mToleranceParam, 0.70f);
                 float detectedPitch = mPitchTracker.processBlock(chunkBuffer.data(), hopSize, tolerance);
                 float normalizedLoudness = mLoudnessExtractor.processBlock(chunkBuffer.data(), hopSize);
 
@@ -166,11 +168,11 @@ public:
                 float filteredPitch = sortedPitches[1];
 
                 // Grundton-Manipulation
-                const float quantStrength = mPitchQuantParam ? mPitchQuantParam->load() : 0.0f;
-                const float inertiaMs     = mPitchInertiaParam ? mPitchInertiaParam->load() : 0.0f;
+                const float quantStrength = getEffectiveParam(10, "pitch_quantize",  mPitchQuantParam,   0.0f);
+                const float inertiaMs     = getEffectiveParam(11, "pitch_inertia",   mPitchInertiaParam, 0.0f);
                 const bool  freezeActive  = mPitchFreezeParam ? (mPitchFreezeParam->load() > 0.5f) : false;
-                const float invertAmount  = mPitchInvertParam ? mPitchInvertParam->load() : 0.0f;
-                const float driftCentsMax = mVoiceDriftParam ? mVoiceDriftParam->load() : 0.0f;
+                const float invertAmount  = getEffectiveParam(12, "pitch_inversion", mPitchInvertParam,  0.0f);
+                const float driftCentsMax = getEffectiveParam(13, "voice_drift",     mVoiceDriftParam,   0.0f);
 
                 float modifiedPitch = filteredPitch;
 
@@ -180,14 +182,12 @@ public:
                     frozenPitchVal = modifiedPitch;
                 }
 
-                // Inversion (Spiegelung an C4 = 261.63 Hz)
                 if (invertAmount > 0.001f && modifiedPitch > 40.0f) {
                     const float refFreq = 261.63f;
                     const float invFreq = (refFreq * refFreq) / modifiedPitch;
                     modifiedPitch = (1.0f - invertAmount) * modifiedPitch + invertAmount * invFreq;
                 }
 
-                // Quantisierung
                 if (quantStrength > 0.001f && modifiedPitch > 40.0f) {
                     const float midiNote = 69.0f + 12.0f * std::log2(modifiedPitch / 440.0f);
                     const float roundedMidi = std::round(midiNote);
@@ -195,7 +195,6 @@ public:
                     modifiedPitch = (1.0f - quantStrength) * modifiedPitch + quantStrength * quantPitch;
                 }
 
-                // Inertia / Portamento
                 if (inertiaMs > 1.0f) {
                     const float tau = inertiaMs * 0.001f;
                     const float alpha = 1.0f - std::exp(-hopTimeSec / tau);
@@ -238,32 +237,33 @@ public:
                 const float* rawNoise = outputTensors[2].GetTensorData<float>();
                 const size_t noiseBinCount = outputTensors[2].GetTensorTypeAndShapeInfo().GetElementCount();
 
-                // 4. Parameter abfragen
-                const float detuneCents    = mDetuneParam ? mDetuneParam->load() : 8.0f;
-                const float stereoSpread   = mSpreadParam ? mSpreadParam->load() : 0.7f;
-                const float formantBlend   = mFormantParam ? mFormantParam->load() : 0.5f;
-                const float spectralTilt   = mTiltParam ? mTiltParam->load() : 0.5f;
-                const float transientTrack = mTransientParam ? mTransientParam->load() : 0.5f;
-                const float noiseGain      = mNoiseGainParam ? mNoiseGainParam->load() : 0.2f;
+                // 4. Parameter abfragen (mit Sequencer-Override)
+                const float detuneCents    = getEffectiveParam(1,  "detune_cents",    mDetuneParam,    8.0f);
+                const float stereoSpread   = getEffectiveParam(2,  "stereo_spread",   mSpreadParam,    0.7f);
+                const float formantBlend   = getEffectiveParam(4,  "formant_blend",   mFormantParam,   0.5f);
+                const float spectralTilt   = getEffectiveParam(3,  "spectral_tilt",   mTiltParam,      0.5f);
+                const float transientTrack = getEffectiveParam(6,  "transient_track", mTransientParam, 0.5f);
+                const float noiseGain      = getEffectiveParam(7,  "noise_gain",      mNoiseGainParam, 0.2f);
 
-                const float harmBalance    = mHarmBalanceParam ? mHarmBalanceParam->load() : 0.5f;
+                const float harmBalance    = getEffectiveParam(14, "harmony_balance", mHarmBalanceParam, 0.5f);
                 const auto mixMode         = static_cast<SynthesisMixMode>(mMixModeParam ? static_cast<int>(mMixModeParam->load()) : 0);
 
-                const float subGain        = mSubGainParam ? mSubGainParam->load() : 0.35f;
-                const float subOct         = mSubOctParam ? mSubOctParam->load() : -1.0f;
-                const float subSemi        = mSubSemiParam ? mSubSemiParam->load() : 0.0f;
+                // Stimmen-Pegel und Tonhöhen (Oktaven & Halbtöne via Sequencer)
+                const float subGain        = getEffectiveParam(15, "sub_gain",       mSubGainParam,   0.35f);
+                const float subOct         = getEffectiveParam(16, "sub_octave",     mSubOctParam,   -1.0f);
+                const float subSemi        = getEffectiveParam(17, "sub_semitones",  mSubSemiParam,   0.0f);
 
-                const float high1Gain      = mHigh1GainParam ? mHigh1GainParam->load() : 0.2f;
-                const float high1Oct       = mHigh1OctParam ? mHigh1OctParam->load() : 1.0f;
-                const float high1Semi      = mHigh1SemiParam ? mHigh1SemiParam->load() : 0.0f;
+                const float high1Gain      = getEffectiveParam(18, "high_gain",      mHigh1GainParam, 0.20f);
+                const float high1Oct       = getEffectiveParam(19, "high_octave",    mHigh1OctParam,  1.0f);
+                const float high1Semi      = getEffectiveParam(20, "high_semitones", mHigh1SemiParam, 0.0f);
 
-                const float high2Gain      = mHigh2GainParam ? mHigh2GainParam->load() : 0.0f;
-                const float high2Oct       = mHigh2OctParam ? mHigh2OctParam->load() : 2.0f;
-                const float high2Semi      = mHigh2SemiParam ? mHigh2SemiParam->load() : 0.0f;
+                const float high2Gain      = getEffectiveParam(21, "high2_gain",     mHigh2GainParam, 0.00f);
+                const float high2Oct       = getEffectiveParam(22, "high2_octave",   mHigh2OctParam,  2.0f);
+                const float high2Semi      = getEffectiveParam(23, "high2_semitones", mHigh2SemiParam, 0.0f);
 
-                const float high3Gain      = mHigh3GainParam ? mHigh3GainParam->load() : 0.0f;
-                const float high3Oct       = mHigh3OctParam ? mHigh3OctParam->load() : 1.0f;
-                const float high3Semi      = mHigh3SemiParam ? mHigh3SemiParam->load() : 7.0f;
+                const float high3Gain      = getEffectiveParam(24, "high3_gain",     mHigh3GainParam, 0.00f);
+                const float high3Oct       = getEffectiveParam(25, "high3_octave",   mHigh3OctParam,  1.0f);
+                const float high3Semi      = getEffectiveParam(26, "high3_semitones", mHigh3SemiParam, 7.0f);
 
                 const std::array<WaveformType, 4> harmonyWaves = {
                     static_cast<WaveformType>(mSubWaveParam ? static_cast<int>(mSubWaveParam->load()) : 0),
@@ -272,7 +272,6 @@ public:
                     static_cast<WaveformType>(mHigh3WaveParam ? static_cast<int>(mHigh3WaveParam->load()) : 0)
                 };
 
-                // Unkorrelierte Drift pro Stimme
                 std::array<float, 4> driftCents = {0.0f, 0.0f, 0.0f, 0.0f};
                 for (size_t d = 0; d < 4; ++d) {
                     voiceDriftPhases[d] += hopTimeSec * (0.3f + 0.2f * static_cast<float>(d));
@@ -284,6 +283,7 @@ public:
                 const float high1PitchMult = std::pow(2.0f, (high1Oct * 12.0f + high1Semi + driftCents[1] / 100.0f) / 12.0f);
                 const float high2PitchMult = std::pow(2.0f, (high2Oct * 12.0f + high2Semi + driftCents[2] / 100.0f) / 12.0f);
                 const float high3PitchMult = std::pow(2.0f, (high3Oct * 12.0f + high3Semi + driftCents[3] / 100.0f) / 12.0f);
+
 
                 // 5. Dynamische Transienten-Ansprache
                 const bool isSounding = (normalizedLoudness > 0.06f);
@@ -415,12 +415,24 @@ public:
     }
 
 private:
+    float getEffectiveParam(size_t paramIdx, const char* paramId, std::atomic<float>* rawAtomic, float defaultVal) const noexcept {
+        if (mSequencer.isAutomated(paramIdx)) {
+            if (auto* p = mApvts.getParameter(paramId)) {
+                return denormaliseParam(p->getNormalisableRange(), mSequencer.getInterpolatedValue(paramIdx));
+            }
+        }
+        return rawAtomic ? rawAtomic->load() : defaultVal;
+    }
+
     juce::AbstractFifo& mInputFifo;
     std::vector<float>& mInputStorage;
     juce::AbstractFifo& mOutputFifoL;
     std::vector<float>& mOutputStorageL;
     juce::AbstractFifo& mOutputFifoR;
     std::vector<float>& mOutputStorageR;
+
+    juce::AudioProcessorValueTreeState& mApvts;
+    SequencerEngine& mSequencer;
 
     std::atomic<float>* mDetuneParam       = nullptr;
     std::atomic<float>* mSpreadParam       = nullptr;

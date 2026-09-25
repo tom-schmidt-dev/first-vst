@@ -2,6 +2,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "InferenceWorker.h"
 #include "../../dsp/include/LFO.hpp"
+#include "../../dsp/include/SequencerEngine.hpp"
 
 class DDSPAudioProcessor : public juce::AudioProcessor {
 public:
@@ -30,6 +31,8 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    SequencerEngine& getSequencer() noexcept { return mSequencer; }
+
     juce::AudioProcessorValueTreeState apvts;
 
 private:
@@ -48,6 +51,7 @@ private:
 
     std::unique_ptr<InferenceWorker> mWorker;
     LFO mLfo;
+    SequencerEngine mSequencer;
 
     std::atomic<float>* mDryWetParam      = nullptr;
     std::atomic<float>* mLfoDepthParam    = nullptr;
