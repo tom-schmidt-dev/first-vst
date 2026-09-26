@@ -1,7 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "InferenceWorker.h"
-#include "../../dsp/include/LFO.hpp"
+#include "PresetManager.h"
 #include "../../dsp/include/SequencerEngine.hpp"
 
 class DDSPAudioProcessor : public juce::AudioProcessor {
@@ -18,20 +18,21 @@ public:
     bool hasEditor() const override { return true; }
 
     const juce::String getName() const override { return "DDSP Timbre Transfer"; }
-    bool acceptsMidi() const override { return false; }
+    bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram(int) override {}
-    const juce::String getProgramName(int) override { return {}; }
+    int getNumPrograms() override { return mPresetManager.getNumPresets(); }
+    int getCurrentProgram() override { return mCurrentPresetIndex; }
+    void setCurrentProgram(int index) override;
+    const juce::String getProgramName(int index) override { return mPresetManager.getPresetName(index); }
     void changeProgramName(int, const juce::String&) override {}
 
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     SequencerEngine& getSequencer() noexcept { return mSequencer; }
+    PresetManager& getPresetManager() noexcept { return mPresetManager; }
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -50,15 +51,15 @@ private:
     std::vector<float> mOutputBufferR;
 
     std::unique_ptr<InferenceWorker> mWorker;
-    LFO mLfo;
     SequencerEngine mSequencer;
+    PresetManager mPresetManager;
 
-    std::atomic<float>* mDryWetParam      = nullptr;
-    std::atomic<float>* mLfoDepthParam    = nullptr;
-    std::atomic<float>* mLfoWaveParam     = nullptr;
-    std::atomic<float>* mLfoSyncParam     = nullptr;
-    std::atomic<float>* mLfoRateHzParam   = nullptr;
-    std::atomic<float>* mLfoRateSyncParam = nullptr;
+    std::atomic<int> mActiveMidiNote{-1};
+    std::atomic<float> mActiveMidiVelocity{0.0f};
+    int mCurrentPresetIndex = 0;
+
+    std::atomic<float>* mDryWetParam = nullptr;
+    std::atomic<float>* mSampleSyncModeParam = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DDSPAudioProcessor)
 };

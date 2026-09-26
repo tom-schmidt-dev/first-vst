@@ -23,8 +23,8 @@ juce_add_plugin(DDSP_Timbre
     PLUGIN_CODE Ddsp
     FORMATS VST3 Standalone
     PRODUCT_NAME "DDSP Timbre Transfer"
-    IS_SYNTH FALSE
-    NEEDS_MIDI_INPUT FALSE
+    IS_SYNTH TRUE
+    NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
 )
@@ -35,6 +35,7 @@ target_sources(DDSP_Timbre PRIVATE
     source/PluginEditor.cpp
     source/PluginEditor.h
     source/InferenceWorker.h
+    source/PresetManager.h
 )
 
 # ONNX Runtime als explizites imported Target definieren
@@ -81,3 +82,32 @@ add_custom_command(TARGET DDSP_Timbre_VST3 POST_BUILD
         ${CMAKE_CURRENT_SOURCE_DIR}/libs/onnxruntime/lib/libonnxruntime.so
         $<TARGET_FILE_DIR:DDSP_Timbre_VST3>/libonnxruntime.so
 )
+
+# Automatisierter Audio-Test-Runner (rendert WAV-Dateien mit verschiedenen Sounds)
+add_executable(test_audio_render tools/test_audio_render.cpp)
+target_include_directories(test_audio_render PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/_deps/juce-src/modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/source
+    ${CMAKE_CURRENT_SOURCE_DIR}/../dsp/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/onnxruntime/include
+)
+target_compile_definitions(test_audio_render PRIVATE
+    JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1
+    JUCE_STANDALONE_APPLICATION=1
+    JUCE_USE_CURL=0
+    JUCE_WEB_BROWSER=0
+)
+target_link_libraries(test_audio_render PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/DDSP_Timbre_artefacts/Release/libDDSP Timbre Transfer_SharedCode.a"
+    onnxruntime
+    asound fontconfig freetype pthread dl rt
+)
+add_custom_command(TARGET test_audio_render POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/ddsp_decoder.onnx
+        $<TARGET_FILE_DIR:test_audio_render>/ddsp_decoder.onnx
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/libs/onnxruntime/lib/libonnxruntime.so
+        $<TARGET_FILE_DIR:test_audio_render>/libonnxruntime.so
+)
+
